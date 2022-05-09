@@ -38,7 +38,7 @@ int main(int argc, char** argv){
   /* In a never ending loop. */
   while (1) {
     /* Output the prompt */
-    char* input = readline("Lispy> ");
+    char* input = readline("Lishp> ");
 
     /* Add line to history. */
     add_history(input);
