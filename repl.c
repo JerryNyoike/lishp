@@ -34,6 +34,7 @@ int main(int argc, char** argv){
   /* Print Version and exit information. */
   puts("Lispy Version 0.0.1");
   puts("Press Ctrl+c to exit.");
+  puts("Press Ctrl+d gives a segfault, we are working to fix this.");
 
   /* In a never ending loop. */
   while (1) {
@@ -44,7 +45,7 @@ int main(int argc, char** argv){
     add_history(input);
 
     /* Echo input back to user */
-    printf("No you are a %s\n", input);
+    printf("You gave me %s\n", input);
 
     /* Free retrieved input. */
     free(input);
