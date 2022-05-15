@@ -83,8 +83,8 @@ void lval_print(lval val) {
 
 void lval_println(lval val) { lval_print(val); putchar('\n'); }
 
-long eval(mpc_ast_t* tree);
-long eval_bin_op(char* op, long first_arg, long second_arg);
+lval eval(mpc_ast_t* tree);
+lval eval_bin_op(char* op, lval first_arg, lval second_arg);
 long eval_op(char* op, long arg);
 
 int main(int argc, char** argv){
@@ -123,8 +123,9 @@ int main(int argc, char** argv){
 
     if (mpc_parse("<stdin>", input, Lispy, &result)) {
       /* Print the AST. */
-      long res = eval(result.output);
-      printf("%li\n", res);
+      lval res = eval(result.output);
+      lval_println(res);
+      /* printf("%li\n", res); */
       /* mpc_ast_print(result.output); */
       /* mpc_ast_delete(result.output); */
     } else {
@@ -140,14 +141,19 @@ int main(int argc, char** argv){
   return 0;
 }
 
-long eval(mpc_ast_t* tree) {
-  if (strstr(tree->tag, "number")) return atoi(tree->contents);
+lval eval(mpc_ast_t* tree) {
+  if (strstr(tree->tag, "number")) {
+    /* Check that number is within range */
+    errno = 0;
+    long num = strtol(tree->contents, NULL, 10);
+    return errno != ERANGE ? lval_num(num) : lval_err(LERR_BAD_NUM);
+  }
 
   /* Get the operator */
   char* op = tree->children[1]->contents;
 
   /* Evaluate the first operand  */
-  long res = eval(tree->children[2]);
+  lval res = eval(tree->children[2]);
 
   /* Reduce the entire expression */
   int i = 3;
@@ -158,14 +164,23 @@ long eval(mpc_ast_t* tree) {
   return res;
 }
 
-long eval_bin_op(char* op, long first_arg, long second_arg) {
-  if (strcmp(op, "+") == 0) return first_arg + second_arg; 
-  else if (strcmp(op, "-") == 0) return first_arg - second_arg; 
-  else if (strcmp(op, "/") == 0) return first_arg / second_arg; 
-  else if (strcmp(op, "*") == 0) return first_arg * second_arg; 
-  else if (strcmp(op, "%") == 0) return first_arg % second_arg;
+lval eval_bin_op(char* op, lval first_arg, lval second_arg) {
+  /* Check if either value is an error */
+  if (first_arg.type == LVAL_ERR) return first_arg;
+  if (second_arg.type == LVAL_ERR) return second_arg;
+  
+  if (strcmp(op, "+") == 0) return lval_num(first_arg.num + second_arg.num); 
+  else if (strcmp(op, "-") == 0) return lval_num(first_arg.num - second_arg.num); 
+  else if (strcmp(op, "*") == 0) return lval_num(first_arg.num * second_arg.num); 
+  else if (strcmp(op, "%") == 0) return lval_num(first_arg.num % second_arg.num);
+  else if (strcmp(op, "/") == 0) {
+    if (second_arg.num == 0)    /* Second number is zero return error */
+      return lval_err(LERR_DIV_ZERO);
+    return lval_num(first_arg.num / second_arg.num);
+  }
 
-  return 0;
+  /* The operator does not match any of the supported ones, return error */
+  return lval_err(LERR_BAD_OP);
 }
 
 long eval_op(char* op, long arg) {
