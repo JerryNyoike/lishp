@@ -31,6 +31,15 @@ void add_history(char* unused);
 #include <editline/history.h>
 #endif
 
+int number_of_nodes(mpc_ast_t* t){
+  if (t->children_num == 0) return 1;
+  return 1 + number_of_nodes(*(t->children + 1));
+}
+
+long eval(mpc_ast_t* tree);
+long eval_bin_op(char* op, long first_arg, long second_arg);
+long eval_op(char* op, long arg);
+
 int main(int argc, char** argv){
   /* Define the grammar for polish notation. */
   mpc_parser_t* Number = mpc_new("number");
@@ -39,11 +48,11 @@ int main(int argc, char** argv){
   mpc_parser_t* Lispy = mpc_new("lispy");
 
   mpca_lang(MPCA_LANG_DEFAULT,
-	    "                                                    \
-              number   : /-?[0-9]+/ ;                            \
-              operator : /'+' | '-' | '*' | '/';                 \
-              expr     : <number> | '(' <operator> <expr>+ ')';  \
-              lispy    : /^/ <operator> <expr>+ /$/;             \
+	    "                                                           \
+              number   : /-?[0-9]+/ ;					\
+              operator : '+' | '-' | '*' | '/' | '%';			\
+              expr     : <number> | '(' <operator> <expr>+ ')';		\
+              lispy    : /^/ <operator> <expr>+ /$/;			\
 	    ",
 	    Number, Expr, Operator, Lispy);
   
@@ -61,12 +70,59 @@ int main(int argc, char** argv){
     add_history(input);
 
     /* Echo input back to user */
-    printf("You gave me %s\n", input);
+    /* printf("You gave me %s\n", input); */
+    /* Parse the user input */
+    mpc_result_t result;
 
+    if (mpc_parse("<stdin>", input, Lispy, &result)) {
+      /* Print the AST. */
+      long res = eval(result.output);
+      printf("%li\n", res);
+      /* mpc_ast_print(result.output); */
+      /* mpc_ast_delete(result.output); */
+    } else {
+      /* Handle the error */
+      mpc_err_print(result.error);
+      mpc_err_delete(result.error);
+    }
     /* Free retrieved input. */
     free(input);
   }
 
   mpc_cleanup(4, Number, Operator, Expr, Lispy);
+  return 0;
+}
+
+long eval(mpc_ast_t* tree) {
+  if (strstr(tree->tag, "number")) return atoi(tree->contents);
+
+  /* Get the operator */
+  char* op = tree->children[1]->contents;
+
+  /* Evaluate the first operand  */
+  long res = eval(tree->children[2]);
+
+  /* Reduce the entire expression */
+  int i = 3;
+  while (strstr(tree->children[i]->tag, "expr")) {
+    res = eval_bin_op(op, res, eval(tree->children[i++]));
+  }
+
+  return res;
+}
+
+long eval_bin_op(char* op, long first_arg, long second_arg) {
+  if (strcmp(op, "+") == 0) return first_arg + second_arg; 
+  else if (strcmp(op, "-") == 0) return first_arg - second_arg; 
+  else if (strcmp(op, "/") == 0) return first_arg / second_arg; 
+  else if (strcmp(op, "*") == 0) return first_arg * second_arg; 
+  else if (strcmp(op, "%") == 0) return first_arg % second_arg;
+
+  return 0;
+}
+
+long eval_op(char* op, long arg) {
+  if (strcmp(op, "+") == 0) return arg;
+  else if (strcmp(op, "-") == 0) return -arg;
   return 0;
 }
