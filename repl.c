@@ -36,6 +36,53 @@ int number_of_nodes(mpc_ast_t* t){
   return 1 + number_of_nodes(*(t->children + 1));
 }
 
+/* Declare a lisp val struct to help with error handling */
+typedef struct {
+  int type;
+  long num;
+  int err;
+} lval;
+
+/* Enum of possible lisp val types */
+enum { LVAL_NUM, LVAL_ERR };
+
+/* Enum of possible error types */
+enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+
+/* lval constructors */
+lval lval_num(long x) {
+  lval val;
+  val.type = LVAL_NUM;
+  val.num = x;
+  return val;
+}
+
+lval lval_err(int e) {
+  lval val;
+  val.type = LVAL_ERR;
+  val.err = e;
+  return val;
+}
+
+/* Print a lisp value */
+void lval_print(lval val) {
+  switch (val.type) {
+  case LVAL_NUM:
+    printf("%ld\n", val.num);
+    break;
+  case LVAL_ERR:
+    if (val.err == LERR_DIV_ZERO)
+      printf("Error: Division by zero!");
+    else if (val.err == LERR_BAD_OP)
+      printf("Error: Unsupported operator!");
+    else if (val.err == LERR_BAD_NUM)
+      printf("Error: Invalid number!");
+    break;
+  }
+}
+
+void lval_println(lval val) { lval_print(val); putchar('\n'); }
+
 long eval(mpc_ast_t* tree);
 long eval_bin_op(char* op, long first_arg, long second_arg);
 long eval_op(char* op, long arg);
