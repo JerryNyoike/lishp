@@ -34,28 +34,61 @@ void add_history(char* unused);
 #include <editline/history.h>
 #endif
 
+/* Forward declare structs */
+struct lval;
+struct lenv;
+
+typedef struct lval lval;
+typedef struct lenv lenv;
+
+/*  */
+typedef lval* (*lbuiltin) (lval*, lenv*);
+
 /* Declare a lisp val struct to help with error handling */
-typedef struct lval {
+struct lval {
   int type;
+  
   long num;
   char* err;
   char* sym;
+  lbuiltin fun;
+  
   int count;
   struct lval** cell;
-} lval;
+};
+
+/* Declare our environment that holds 2 name, lval arrays */
+struct lenv {
+  int count;			/* Number of items in the environment */
+  char** syms;			/* Symbols (name) */
+  lval** vals;			/* Lisp Values */
+};
 
 /* Enum of possible lisp val types */
-enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
+enum { LVAL_NUM, LVAL_ERR, LVAL_SYM,
+  LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR };
 
-/* lval constructors */
+/* Constructors */
 lval* lval_num(long x);
 lval* lval_err(char* e);
 lval* lval_sym(char* sym);
+lval* lval_fun(lbuiltin func);
 lval* lval_sexpr(void);
 lval* lval_qexpr(void);
 
-/* Lisp value destructor */
+/* Lisp Value copy function */
+lval* lval_copy(lval* orig_lval);
+
+/* Destructors */
 void lval_del(lval* val);
+
+/* Environment manipulation. */
+lenv* lenv_new(void);		/* constructor */
+void lenv_del(lenv* env);	/* destructor */
+int lenv_contains(lval* sym, lenv* env);	/* Check if the env contains this name value pairing */
+lval* lenv_get(lval* sym, lenv* env);	/* Get a value from the environment */
+void lval_insert(lval* sym, lenv* env, lval* val);  /* Remove value from the environment */
+
 
 /* Print a lisp value */
 void lval_print(lval* val);
@@ -79,8 +112,8 @@ lval* builtin_init(lval* sexpr);
 lval* lval_take(lval* val, int i);
 lval* lval_pop(lval* sexpr, int i);
 lval* lval_join(lval* first, lval* lval_second);
-lval* lval_eval(lval* val);
-lval* lval_eval_sexpr(lval* sexpr);
+lval* lval_eval(lval* val, lenv* env);
+lval* lval_eval_sexpr(lval* sexpr, lenv* env);
 
 int main(int argc, char** argv){
   /* Define the grammar for polish notation. */
@@ -94,10 +127,7 @@ int main(int argc, char** argv){
   mpca_lang(MPCA_LANG_DEFAULT,
 	    "                                                           \
               number   : /-?[0-9]+/;					\
-              symbol   : \"list\" | \"head\" | \"tail\"			\
-                       | \"join\" | \"eval\" | \"len\"			\
-                       | \"cons\" | \"init\" | '+' | '-'		\
-                       | '*' | '/' | '%';				\
+              symbol   : /[a-zA-Z0-9+_\\-*\\/\\\\=<>!&]+/;						\
 	      sexpr    : '(' <expr>* ')';				\
 	      qexpr    : '{' <expr>* '}';				\
               expr     : <number> | <symbol> | <sexpr> | <qexpr>;	\
@@ -142,6 +172,7 @@ int main(int argc, char** argv){
   return 0;
 }
 
+/* Lisp Value constructors */
 lval* lval_num(long num) {
   lval* val = malloc(sizeof(lval));
   val->type = LVAL_NUM;
@@ -165,6 +196,13 @@ lval* lval_sym(char* sym) {
   return val;
 }
 
+lval* lval_fun(lbuiltin func) {
+  lval *val = malloc(sizeof(lval));
+  val->type = LVAL_FUN;
+  val->fun = func;
+  return val;
+}
+
 lval* lval_sexpr(void) {
   lval* val = malloc(sizeof(lval));
   val->type = LVAL_SEXPR;
@@ -181,9 +219,11 @@ lval* lval_qexpr(void) {
   return val;  
 }
 
+/* Lisp Value deletion */
 void lval_del(lval* val) {
   switch (val->type) {
   case LVAL_NUM: break;
+  case LVAL_FUN: break;
   case LVAL_SYM:
     free(val->sym);
     break;
@@ -202,6 +242,7 @@ void lval_del(lval* val) {
   free(val);
 }
 
+/* Lisp Value printing. */
 void lval_print(lval* val) {
   switch (val->type) {
   case LVAL_NUM:
@@ -212,6 +253,9 @@ void lval_print(lval* val) {
     break;
   case LVAL_SYM:
     printf("%s", val->sym);
+    break;
+  case LVAL_FUN:
+    printf("<function>");
     break;
   case LVAL_SEXPR:
     lval_expr_print(val, '(', ')');
@@ -236,6 +280,100 @@ void lval_expr_print(lval* val, char open, char close) {
   }
 
   putchar(close);
+}
+
+/* Lisp Value copy function */
+lval* lval_copy(lval* orig_val) {
+  lval* copy_val = malloc(sizeof(lval));
+  copy_val->type = orig_val->type;
+
+  switch (copy_val->type) {
+  case LVAL_NUM:
+    copy_val->num = orig_val->num;
+    break;
+  case LVAL_FUN:
+    copy_val->fun = orig_val->fun;
+    break;
+  case LVAL_ERR:
+    copy_val->err = malloc(sizeof(strlen(orig_val->err)+1));
+    strcpy(copy_val->err, orig_val->err);
+    break;
+  case LVAL_SYM:
+    copy_val->sym = malloc(sizeof(strlen(orig_val->sym)+1));
+    strcpy(copy_val->sym, orig_val->sym);
+    break;
+  case LVAL_QEXPR:
+  case LVAL_SEXPR:
+    copy_val->count = orig_val->count;
+    copy_val->cell = malloc(sizeof(lval*) * orig_val->count);
+    for (int i = 0; i < orig_val->count; i++) {
+      copy_val->cell[i] = lval_copy(orig_val->cell[i]);
+    }
+    break;
+  }
+
+  return copy_val;
+}
+
+/* Environment Manipulation */
+lenv* lenv_new(void) {
+  lenv* env = malloc(sizeof(lenv));
+  env->count = 0;
+  env->syms = NULL;
+  env->vals = NULL;
+
+  return env;
+}
+
+void lenv_del(lenv* env) {
+  for (int i = 0; i < env->count; i++) { /* Free array indices */
+    free(env->syms[i]);
+    free(env->vals[i]);
+  }
+  /* Free the array pointers */
+  free(env->syms);
+  free(env->vals);
+
+  free(env);			/* Free the entire struct. */
+}
+
+int lenv_contains(lval* sym, lenv* env) {
+  for (int i = 0; i < env->count; i++) {
+    if (strcmp(sym->sym, env->syms[i]) == 0) {
+      return i;
+    }
+  }
+
+  return -1;			/* Symbol not in the environment */
+}
+
+lval* lenv_get(lval* sym, lenv* env) {
+  int idx = lenv_contains(sym, env);
+
+  if (idx >= 0) {		/* Create a copy and return it */
+    return lval_copy(env->vals[idx]);
+  }
+  
+  /* Symbol not found, return an error.  */
+  return lval_err("Symbol not found");
+}
+
+void lenv_insert(lval* sym, lenv* env, lval* val) {
+  int idx = lenv_contains(sym, env);
+
+  if (idx >= 0) {		/* Reassign the value */
+    lval_del(env->vals[idx]);
+    env->vals[idx] = lval_copy(val);
+    return;
+  }
+
+  env->count++;
+  env->syms = realloc(env->syms, env->count);
+  env->vals = realloc(env->vals, env->count);
+
+  env->syms[env->count-1] = malloc(sizeof(strlen(sym->sym)+1));
+  strcpy(env->syms[env->count-1], sym->sym);
+  env->vals[env->count-1] = lval_copy(val);
 }
 
 lval* lval_read_num(mpc_ast_t* tree) {
@@ -278,10 +416,10 @@ lval* lval_add(lval* orig_lval, lval* new_lval) {
   return orig_lval;
 }
 
-lval* lval_eval_sexpr(lval* sexpr) {
+lval* lval_eval_sexpr(lval* sexpr, lenv* env) {
   /* Evaluate the children */
   for (int i = 0; i < sexpr->count; i++) {
-    sexpr->cell[i] = lval_eval(sexpr->cell[i]);
+    sexpr->cell[i] = lval_eval(sexpr->cell[i], env);
   }
 
   /* In case of an error return it */
@@ -301,23 +439,28 @@ lval* lval_eval_sexpr(lval* sexpr) {
     return lval_take(sexpr, 0);
   }
 
-  /* Ensure the first element is a symbol */
+  /* Ensure the first element is a function */
   lval* first = lval_pop(sexpr, 0);
-  if (first->type != LVAL_SYM) {
+  if (first->type != LVAL_FUN) {
     lval_del(first);
     lval_del(sexpr);
     return lval_err("S-Expression does not start with symbol");
   }
   
   /* apply a builtin to the reduced sexpr */
-  lval* result = builtin(first->sym, sexpr);
+  lval* result = first->fun(sexpr, env);
   lval_del(first);
   return result;
 }
 
-lval* lval_eval(lval* sexpr) {
+lval* lval_eval(lval* sexpr, lenv* env) {
+  if (sexpr->type == LVAL_SYM) {
+    lval* val = lenv_get(sexpr, env);
+    lval_del(sexpr);
+    return val;
+  }
   if (sexpr->type == LVAL_SEXPR) /* reduce s-expressions then return them */
-    return lval_eval_sexpr(sexpr);
+    return lval_eval_sexpr(sexpr, env);
 
   return sexpr;			/* Return all other types as they're in simplest form */
 }
